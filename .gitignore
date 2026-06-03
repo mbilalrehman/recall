@@ -1,0 +1,4 @@
+recall_memory.db 
+__pycache__/ 
+recall_ai.egg-info/ 
+*.db 
