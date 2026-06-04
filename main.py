@@ -176,7 +176,6 @@ def run_setup():
             )
 
         data = response.json()
-        print(f"DEBUG: {data}")  # debug ke liye
         token = data.get("token")
 
         if not token:
