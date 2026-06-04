@@ -17,6 +17,18 @@ BACKEND_URL = "http://100.53.1.66:8000"
 # ══════════════════════════════════════
 # TOKEN
 # ══════════════════════════════════════
+def require_login():
+    token = get_token()
+    if not token:
+        console.print()
+        console.print(Panel(
+            "[yellow]Pehle account banao![/yellow]\n\n"
+            "Run karo: [bold cyan]recall --setup[/bold cyan]",
+            title="[bold]⚡ Login Required[/bold]",
+            border_style="yellow"
+        ))
+        exit(1)
+    return token
 
 def get_token():
     config_path = os.path.expanduser("~/.recall/config")
@@ -215,6 +227,7 @@ def run_setup():
 # ══════════════════════════════════════
 
 def show_history():
+    require_login()
     results = get_recent_history(10)
 
     if not results:
@@ -250,6 +263,7 @@ def show_history():
 # ══════════════════════════════════════
 
 def fix_error(error_text):
+    require_login()
     with console.status("[cyan]Analyzing error...[/cyan]", spinner="dots"):
         try:
             token = get_token()
@@ -287,6 +301,7 @@ def fix_error(error_text):
 # ══════════════════════════════════════
 
 def save_workflow(name):
+    require_login()
     console.print()
     console.print(Panel(
         f"Saving workflow: [bold cyan]{name}[/bold cyan]\n"
@@ -332,6 +347,7 @@ def save_workflow(name):
 # ══════════════════════════════════════
 
 def run_workflow(name):
+    require_login()
     conn = get_connection()
     cursor = conn.execute(
         "SELECT commands FROM workflows WHERE name=?", (name,)
@@ -389,6 +405,7 @@ def run_workflow(name):
 # ══════════════════════════════════════
 
 def list_workflows():
+    require_login()
     conn = get_connection()
     cursor = conn.execute(
         "SELECT name, commands, timestamp FROM workflows ORDER BY timestamp DESC"
@@ -484,6 +501,19 @@ def recall(do_setup, history, error, save, run, list_wf, query):
 
     if list_wf:
         list_workflows()
+        return
+
+    # Login check — bina setup ke kaam nahi karega
+    token = get_token()
+    if not token:
+        console.print()
+        console.print(Panel(
+            "[yellow]Welcome to Recall![/yellow]\n\n"
+            "Please Login:\n"
+            "[bold cyan]recall --setup[/bold cyan]",
+            title="[bold]⚡ Setup Required[/bold]",
+            border_style="yellow"
+        ))
         return
 
     # Natural language query

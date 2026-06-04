@@ -2,3 +2,8 @@ recall_memory.db
 __pycache__/ 
 recall_ai.egg-info/ 
 *.db 
+dist/ 
+recall_ai.egg-info/ 
+recall_terminal.egg-info/ 
+*.db 
+recall-backend/ 
