@@ -4,6 +4,7 @@ import os
 import subprocess
 import platform
 import requests
+import webbrowser
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -11,24 +12,11 @@ from rich import box
 from rich.prompt import Prompt, Confirm
 
 console = Console()
-# BACKEND_URL = "http://127.0.0.1:8000"
 BACKEND_URL = "http://100.53.1.66:8000"
 
 # ══════════════════════════════════════
-# TOKEN
+# TOKEN HELPERS
 # ══════════════════════════════════════
-def require_login():
-    token = get_token()
-    if not token:
-        console.print()
-        console.print(Panel(
-            "[yellow]Pehle account banao![/yellow]\n\n"
-            "Run karo: [bold cyan]recall --setup[/bold cyan]",
-            title="[bold]⚡ Login Required[/bold]",
-            border_style="yellow"
-        ))
-        exit(1)
-    return token
 
 def get_token():
     config_path = os.path.expanduser("~/.recall/config")
@@ -39,76 +27,21 @@ def get_token():
                     return line.strip().split("=", 1)[1]
     return None
 
-def get_os():
-    system = platform.system().lower()
-    if system == "windows":
-        return "windows"
-    elif system == "darwin":
-        return "macos"
-    else:
-        return "linux"
-
-def get_shell():
-    os_type = get_os()
-    if os_type == "windows":
-        return "cmd/powershell"
-    elif os_type == "macos":
-        return "zsh"
-    else:
-        return "bash"
-
-# ══════════════════════════════════════
-# API QUERY — BACKEND SE
-# ══════════════════════════════════════
-
-def api_query(query_text):
+def require_login():
     token = get_token()
     if not token:
+        console.print()
         console.print(Panel(
-            "[red]Not logged in![/red]\n\n"
-            "Run [cyan]recall --setup[/cyan] first.",
-            title="[bold red]⚠ Not Logged In[/bold red]",
-            border_style="red"
+            "[yellow]Not logged in![/yellow]\n\n"
+            "Run: [bold cyan]recall --setup[/bold cyan]",
+            title="[bold]⚡ Login Required[/bold]",
+            border_style="yellow"
         ))
         exit(1)
-
-    try:
-        response = requests.post(
-            f"{BACKEND_URL}/query",
-            json={"query": query_text, "os_type": platform.system()},
-            headers={"Authorization": f"Bearer {token}"}
-        )
-
-        if response.status_code == 401:
-            console.print(Panel(
-                "[red]Session expired![/red]\n\n"
-                "Run [cyan]recall --setup[/cyan] again.",
-                border_style="red"
-            ))
-            exit(1)
-
-        if response.status_code == 429:
-            console.print(Panel(
-                "[red]Free limit reached! (50 queries/month)[/red]\n\n"
-                "Upgrade to Pro: [cyan]recall --upgrade[/cyan]",
-                border_style="red"
-            ))
-            exit(1)
-
-        data = response.json()
-        return data.get("command", "Command not found")
-
-    except requests.exceptions.ConnectionError:
-        console.print(Panel(
-            "[red]Cannot connect to Recall server![/red]\n\n"
-            "Start backend:\n"
-            "[cyan]cd recall-backend && uvicorn main:app --reload[/cyan]",
-            border_style="red"
-        ))
-        exit(1)
+    return token
 
 # ══════════════════════════════════════
-# DATABASE — LOCAL MEMORY
+# LOCAL MEMORY
 # ══════════════════════════════════════
 
 def get_db_path():
@@ -146,7 +79,7 @@ def search_memory(query):
     conn.close()
     return result[0] if result else None
 
-def get_recent_history(limit=5):
+def get_recent_history(limit=10):
     conn = get_connection()
     cursor = conn.execute(
         "SELECT query, command, timestamp FROM memory ORDER BY timestamp DESC LIMIT ?",
@@ -164,7 +97,7 @@ def run_setup():
     console.print()
     console.print(Panel(
         "[bold cyan]Welcome to Recall![/bold cyan]\n\n"
-        "Create your account in 30 seconds.",
+        "Login or create your account.",
         title="[bold]✦ Recall Setup[/bold]",
         border_style="cyan"
     ))
@@ -180,35 +113,45 @@ def run_setup():
             json={"email": email, "password": password}
         )
 
-        # Login fail — naya account banao
-        if response.status_code != 200:
+        if response.status_code == 200:
+            data = response.json()
+            token = data.get("token")
+            plan = data.get("plan", "free")
+            queries_used = data.get("queries_used", 0)
+        else:
+            # Login fail — signup karo
             response = requests.post(
                 f"{BACKEND_URL}/signup",
                 json={"email": email, "password": password}
             )
-
-        data = response.json()
-        token = data.get("token")
+            data = response.json()
+            token = data.get("token")
+            plan = "free"
+            queries_used = 0
 
         if not token:
             console.print(Panel(
-                f"[red]Error: {data}[/red]",
+                f"[red]Error: {data.get('detail', 'Unknown error')}[/red]",
                 border_style="red"
             ))
             return
 
+        # Token save karo
         config_dir = os.path.expanduser("~/.recall")
         os.makedirs(config_dir, exist_ok=True)
         config_path = os.path.join(config_dir, "config")
-
         with open(config_path, 'w') as f:
             f.write(f"TOKEN={token}\n")
+            f.write(f"EMAIL={email}\n")
+
+        limit_text = "Unlimited" if plan == "pro" else f"{queries_used}/50 queries used"
 
         console.print()
         console.print(Panel(
-            "[green]✓ Account ready![/green]\n\n"
-            f"Email: [cyan]{email}[/cyan]\n"
-            f"Plan:  [yellow]Free[/yellow] — 50 queries/month\n\n"
+            f"[green]✓ Logged in![/green]\n\n"
+            f"Email:  [cyan]{email}[/cyan]\n"
+            f"Plan:   [{'green' if plan == 'pro' else 'yellow'}]{plan.upper()}[/{'green' if plan == 'pro' else 'yellow'}]\n"
+            f"Usage:  [dim]{limit_text}[/dim]\n\n"
             "Try: [bold cyan]recall \"how to check ports\"[/bold cyan]",
             title="[bold green]✓ Welcome to Recall![/bold green]",
             border_style="green"
@@ -216,9 +159,7 @@ def run_setup():
 
     except requests.exceptions.ConnectionError:
         console.print(Panel(
-            "[red]Cannot connect to server![/red]\n\n"
-            "Start backend:\n"
-            "[cyan]cd recall-backend && uvicorn main:app --reload[/cyan]",
+            "[red]Cannot connect to Recall server![/red]",
             border_style="red"
         ))
 
@@ -228,7 +169,7 @@ def run_setup():
 
 def show_history():
     require_login()
-    results = get_recent_history(10)
+    results = get_recent_history()
 
     if not results:
         console.print(Panel(
@@ -263,10 +204,12 @@ def show_history():
 # ══════════════════════════════════════
 
 def fix_error(error_text):
-    require_login()
+    token = get_token()
+    if not token:
+        return
+
     with console.status("[cyan]Analyzing error...[/cyan]", spinner="dots"):
         try:
-            token = get_token()
             response = requests.post(
                 f"{BACKEND_URL}/fix-error",
                 json={"error": error_text, "os_type": platform.system()},
@@ -274,7 +217,7 @@ def fix_error(error_text):
             )
             data = response.json()
             cause = data.get("cause", "Unknown")
-            fix = data.get("fix", "No fix found")
+            fix = data.get("fix", "Check manually")
             confidence = data.get("confidence", "Low")
         except:
             cause = "Could not analyze"
@@ -287,10 +230,10 @@ def fix_error(error_text):
 
     console.print()
     console.print(Panel(
-        f"[bold red]✗ Error:[/bold red]  {error_text}\n\n"
-        f"[yellow]● Cause:[/yellow]      {cause}\n\n"
-        f"[green]● Fix:[/green]        [bold cyan]{fix}[/bold cyan]\n\n"
-        f"[{conf_color}]● Confidence:  {confidence}[/{conf_color}]",
+        f"[bold red]✗ Error:[/bold red]   {error_text}\n\n"
+        f"[yellow]● Cause:[/yellow]     {cause}\n\n"
+        f"[green]● Fix:[/green]       [bold cyan]{fix}[/bold cyan]\n\n"
+        f"[{conf_color}]● Confidence: {confidence}[/{conf_color}]",
         title="[bold red]⚡ Error Intelligence[/bold red]",
         border_style="red"
     ))
@@ -458,10 +401,11 @@ def list_workflows():
 @click.option('--save', default=None, help='Save a workflow')
 @click.option('--run', default=None, help='Run a workflow')
 @click.option('--list-workflows', 'list_wf', is_flag=True, help='List saved workflows')
+@click.option('--upgrade', is_flag=True, help='Upgrade to Pro')
 @click.argument('query', nargs=-1)
-def recall(do_setup, history, error, save, run, list_wf, query):
+def recall(do_setup, history, error, save, run, list_wf, upgrade, query):
 
-    if not any([query, do_setup, history, error, save, run, list_wf]):
+    if not any([query, do_setup, history, error, save, run, list_wf, upgrade]):
         console.print()
         console.print(Panel(
             "[bold cyan]✦ RECALL — Your AI Terminal Brain[/bold cyan]\n\n"
@@ -471,6 +415,7 @@ def recall(do_setup, history, error, save, run, list_wf, query):
             "[white]recall --save \"name\"[/white]          [dim]→ Save a workflow[/dim]\n"
             "[white]recall --run \"name\"[/white]           [dim]→ Run a workflow[/dim]\n"
             "[white]recall --list-workflows[/white]        [dim]→ List all workflows[/dim]\n"
+            "[white]recall --upgrade[/white]               [dim]→ Upgrade to Pro ($12/mo)[/dim]\n"
             "[white]recall --setup[/white]                 [dim]→ Setup your account[/dim]",
             title="[bold]⚡ Recall Help[/bold]",
             border_style="cyan",
@@ -503,13 +448,51 @@ def recall(do_setup, history, error, save, run, list_wf, query):
         list_workflows()
         return
 
-    # Login check — bina setup ke kaam nahi karega
+    if upgrade:
+        token = require_login()
+        try:
+            response = requests.post(
+                f"{BACKEND_URL}/create-checkout",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            data = response.json()
+
+            if response.status_code == 400 and "Already Pro" in str(data):
+                console.print(Panel(
+                    "[green]You are already Pro![/green]\n\n"
+                    "Unlimited queries. No limits.",
+                    title="[bold green]✦ PRO MEMBER[/bold green]",
+                    border_style="green"
+                ))
+                return
+
+            url = data.get("checkout_url")
+            if url:
+                console.print(Panel(
+                    f"[green]Opening checkout in browser...[/green]\n\n"
+                    f"[dim]Or open manually:[/dim]\n[cyan]{url}[/cyan]",
+                    title="[bold]💳 Upgrade to Pro — $12/month[/bold]",
+                    border_style="cyan"
+                ))
+                webbrowser.open(url)
+            else:
+                console.print(Panel(
+                    f"[red]Error: {data.get('detail', 'Unknown error')}[/red]",
+                    border_style="red"
+                ))
+        except requests.exceptions.ConnectionError:
+            console.print(Panel("[red]Cannot connect to server![/red]", border_style="red"))
+        except Exception as e:
+            console.print(Panel(f"[red]Error: {e}[/red]", border_style="red"))
+        return
+
+    # Login check
     token = get_token()
     if not token:
         console.print()
         console.print(Panel(
             "[yellow]Welcome to Recall![/yellow]\n\n"
-            "Please Login:\n"
+            "Please setup first:\n"
             "[bold cyan]recall --setup[/bold cyan]",
             title="[bold]⚡ Setup Required[/bold]",
             border_style="yellow"
@@ -532,16 +515,61 @@ def recall(do_setup, history, error, save, run, list_wf, query):
         console.print()
         return
 
-    # Backend se query
+    # Backend query
     with console.status("[cyan]Thinking...[/cyan]", spinner="dots"):
-        command = api_query(q)
+        try:
+            response = requests.post(
+                f"{BACKEND_URL}/query",
+                json={"query": q, "os_type": platform.system()},
+                headers={"Authorization": f"Bearer {token}"}
+            )
+        except requests.exceptions.ConnectionError:
+            console.print(Panel("[red]Cannot connect to Recall server![/red]", border_style="red"))
+            return
+
+    if response.status_code == 401:
+        console.print(Panel(
+            "[red]Session expired![/red]\n\nRun: [cyan]recall --setup[/cyan]",
+            border_style="red"
+        ))
+        return
+
+    if response.status_code == 403:
+        console.print(Panel(
+            "[red]Account banned![/red]\n\nContact support.",
+            border_style="red"
+        ))
+        return
+
+    if response.status_code == 429:
+        console.print(Panel(
+            "[red]Free limit reached! (50 queries/month)[/red]\n\n"
+            "Upgrade: [cyan]recall --upgrade[/cyan]",
+            border_style="red"
+        ))
+        return
+
+    if response.status_code != 200:
+        console.print(Panel(
+            f"[red]Server error: {response.text}[/red]",
+            border_style="red"
+        ))
+        return
+
+    data = response.json()
+    command = data.get("command", "")
+    limit = data.get("limit", "")
+
+    if not command:
+        console.print(Panel("[red]No command returned.[/red]", border_style="red"))
+        return
 
     save_to_memory(q, command)
 
     console.print()
     console.print(Panel(
         f"[bold green]{command}[/bold green]\n\n"
-        f"[dim]↳ AI generated · {platform.system()}[/dim]",
+        f"[dim]↳ AI generated · {platform.system()} · {limit}[/dim]",
         title="[bold]✦ Recall[/bold]",
         border_style="cyan"
     ))
