@@ -1,0 +1,4 @@
+BACKEND_URL = "http://100.53.1.66:8000"
+APP_NAME = "Recall"
+VERSION = "1.0.0"
+FREE_LIMIT = 50
